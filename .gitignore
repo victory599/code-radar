@@ -1,0 +1,4 @@
+# Python 字节码缓存（运行时自动生成，无需纳入版本库）
+__pycache__/
+*.py[cod]
+*$py.class
