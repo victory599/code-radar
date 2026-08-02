@@ -30,6 +30,12 @@ _DANGER = "bold red"
 _PATH = "bright_white"
 _BORDER = "grey37"
 
+# 分榜与危险地图信号标签共用色，建立固定视觉对应。
+_SECTION_STALE = "yellow"
+_SECTION_CHURN = "dark_orange"
+_SECTION_TODO = "magenta"
+_SECTION_MISSING = "red"
+
 # 终端不能单独放大某几行字号，用紧凑的块字横幅制造大标题效果。
 _RADAR_BANNER = "\n".join(
     (
@@ -52,15 +58,15 @@ def render_json(result: ScanResult, fp: Optional[TextIO] = None) -> None:
 def _fmt_stale(days: Optional[int] = None) -> str:
     if days is None:
         return "?"
-    return f"{days}d"
+    return f"{days}天"
 
 
 def _styled_path(path: str) -> Text:
-    """弱化目录、突出文件名，让长路径列表更容易逐行扫读。"""
+    """弱化目录层级对比、整体提亮路径，避免被旁侧信号字压过。"""
     parent, separator, name = path.rpartition("/")
     styled = Text()
     if separator:
-        styled.append(f"{parent}/", style="dim cyan")
+        styled.append(f"{parent}/", style="bright_cyan")
         styled.append(name, style="bold bright_white")
     else:
         styled.append(path, style="bold bright_white")
@@ -78,10 +84,12 @@ def _score_style(score: int) -> str:
     return _OK
 
 
-def _score_bar(score: int, width: int = 6) -> Text:
-    """把分数画成短进度条，方便扫一眼相对高低。"""
-    # 经验上限：分项封顶约 115，条形按 40 饱和即可区分大部分仓库。
-    filled = max(0, min(width, round(score / 40 * width)))
+def _score_bar(score: int, max_score: int, width: int = 6) -> Text:
+    """按本榜最高分相对缩放的短进度条，便于同一次扫描内比较高低。"""
+    if max_score <= 0 or score <= 0:
+        filled = 0
+    else:
+        filled = max(1, min(width, round(score / max_score * width)))
     bar = Text()
     style = _score_style(score)
     bar.append("█" * filled, style=style)
@@ -90,40 +98,32 @@ def _score_bar(score: int, width: int = 6) -> Text:
 
 
 def _signal_tags(risk: FileRisk) -> Text:
-    """拼彩色信号标签：stale / churn / TODO / no-test。"""
+    """拼彩色信号标签；色相与分榜标题一致，整体略降亮度以免压过路径。"""
     tags = Text()
+    sep = " · "
+    # dim + 分区色：保留色相对应，同时让路径成为主视觉。
+    stale_style = f"dim {_SECTION_STALE}"
+    churn_style = f"dim {_SECTION_CHURN}"
+    todo_style = f"dim {_SECTION_TODO}"
+    missing_style = f"dim {_SECTION_MISSING}"
 
-    stale = risk.stale_days
-    if stale is None:
-        tags.append("stale ?", style=_MUTED)
-    elif stale >= 180:
-        tags.append(f"stale {_fmt_stale(stale)}", style=_HOT)
-    elif stale >= 60:
-        tags.append(f"stale {_fmt_stale(stale)}", style=_WARN)
+    if risk.stale_days is None:
+        tags.append("陈旧 ?", style=stale_style)
     else:
-        tags.append(f"stale {_fmt_stale(stale)}", style=_MUTED)
+        tags.append(f"陈旧 {_fmt_stale(risk.stale_days)}", style=stale_style)
 
-    tags.append("  ")
-    if risk.churn >= 8:
-        tags.append(f"churn {risk.churn}", style=_HOT)
-    elif risk.churn >= 3:
-        tags.append(f"churn {risk.churn}", style=_WARN)
-    else:
-        tags.append(f"churn {risk.churn}", style=_MUTED)
+    tags.append(sep, style=_MUTED)
+    tags.append(f"热改 {risk.churn}次", style=churn_style)
 
-    tags.append("  ")
-    if risk.todo_count > 0:
-        todo_style = _HOT if risk.spicy_todo_count else _WARN
-        label = f"TODO {risk.todo_count}"
-        if risk.spicy_todo_count:
-            label += f"!{risk.spicy_todo_count}"
-        tags.append(label, style=todo_style)
-    else:
-        tags.append("TODO 0", style=_MUTED)
+    tags.append(sep, style=_MUTED)
+    label = f"TODO {risk.todo_count}"
+    if risk.spicy_todo_count:
+        label += f"!{risk.spicy_todo_count}"
+    tags.append(label, style=todo_style)
 
     if risk.missing_test:
-        tags.append("  ")
-        tags.append("no-test", style=_DANGER)
+        tags.append(sep, style=_MUTED)
+        tags.append("缺测", style=missing_style)
 
     return tags
 
@@ -173,10 +173,12 @@ def _danger_table(result: ScanResult) -> Table:
         table.add_row("-", "-", "(无源码文件)")
         return table
 
+    # 以本榜最高分为满格，避免固定阈值导致高分区间全部顶满。
+    max_score = max(risk.score for risk in result.risks)
     for i, risk in enumerate(result.risks, start=1):
         risk_txt = Text()
         risk_txt.append(f"{risk.score:>3} ", style=_score_style(risk.score))
-        risk_txt.append_text(_score_bar(risk.score))
+        risk_txt.append_text(_score_bar(risk.score, max_score=max_score))
 
         details = _styled_path(risk.path)
         details.append("\n")
@@ -211,37 +213,38 @@ def render_rich(result: ScanResult, detail_top: int = 5) -> None:
     boards = (
         _board_panel(
             "陈旧",
-            "yellow",
+            _SECTION_STALE,
             _simple_file_table(
                 result.stale_top[:detail_top],
                 value_fn=lambda r: _fmt_stale(r.stale_days),
                 value_header="天数",
-                value_style=_WARN,
+                value_style=_SECTION_STALE,
             ),
         ),
         _board_panel(
             "热改",
-            "dark_orange",
+            _SECTION_CHURN,
             _simple_file_table(
                 result.churn_top[:detail_top],
                 value_fn=lambda r: str(r.churn),
-                value_header="次数",
-                value_style=_HOT,
+                value_header="提交次数",
+                value_style=_SECTION_CHURN,
+                empty_text=f"近 {result.since_days} 天无源码改动",
             ),
         ),
         _board_panel(
             "TODO",
-            "magenta",
+            _SECTION_TODO,
             _todo_table(result.todos, limit=detail_top),
         ),
         _board_panel(
             "缺测热文件",
-            "red",
+            _SECTION_MISSING,
             _simple_file_table(
                 result.missing_test_hot[:detail_top],
-                value_fn=lambda r: f"churn {r.churn}",
+                value_fn=lambda r: f"热改 {r.churn}次",
                 value_header="信号",
-                value_style=_DANGER,
+                value_style=_SECTION_MISSING,
             ),
         ),
     )
@@ -292,6 +295,7 @@ def _simple_file_table(
     value_fn: Callable[[FileRisk], str],
     value_header: str,
     value_style: str = "bold",
+    empty_text: str = "(无)",
 ) -> Table:
     table = Table(
         box=box.SIMPLE,
@@ -311,7 +315,7 @@ def _simple_file_table(
     )
     table.add_column("文件", overflow="fold", style=_PATH)
     if not risks:
-        table.add_row("-", Text("(无)", style=_MUTED))
+        table.add_row("-", Text(empty_text, style=_MUTED))
         return table
     for risk in risks:
         table.add_row(value_fn(risk), _styled_path(risk.path))
@@ -340,14 +344,14 @@ def _todo_table(todos: Sequence[TodoHit], limit: int) -> Table:
         loc = _styled_path(hit.path)
         loc.append(f":{hit.line_no}", style=_MUTED)
 
+        # 摘录整体降亮：色相仍偏 TODO 分区，避免压过左侧路径。
         excerpt = Text()
-        kind_style = _HOT if hit.spicy else "magenta"
-        excerpt.append(hit.kind, style=f"bold {kind_style}")
+        excerpt.append(hit.kind, style=f"dim bold {_SECTION_TODO}")
         if hit.spicy:
-            excerpt.append("!", style=_DANGER)
+            excerpt.append("!", style=f"dim {_SECTION_MISSING}")
         excerpt.append("  ", style=_MUTED)
         # 摘录里可能已含 kind 前缀；展示时保留原文，方便对照源码。
         body = hit.text.strip()
-        excerpt.append(body, style=_WARN if hit.spicy else "default")
+        excerpt.append(body, style="dim")
         table.add_row(loc, excerpt)
     return table

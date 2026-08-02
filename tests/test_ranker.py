@@ -2,7 +2,13 @@
 import unittest
 
 from radar.git_probe import FileHistory
-from radar.ranker import CHURN_HOT_THRESHOLD, MISSING_TEST_BONUS, rank_files, score_file
+from radar.ranker import (
+    CHURN_HOT_THRESHOLD,
+    MISSING_TEST_BONUS,
+    build_scan_result,
+    rank_files,
+    score_file,
+)
 
 
 class RankerTests(unittest.TestCase):
@@ -51,6 +57,33 @@ class RankerTests(unittest.TestCase):
         )
         self.assertEqual(ranked[0].path, "high.py")
         self.assertGreaterEqual(ranked[0].score, ranked[1].score)
+
+    def test_churn_top_omits_zero_churn_files(self):
+        ranked = rank_files(
+            [
+                FileHistory("cold.py", None, 0),
+                FileHistory("hot.py", None, 3),
+            ],
+            todo_totals={},
+            todo_spicy={},
+            missing_test_paths=set(),
+        )
+
+        result = build_scan_result("repo", 90, ranked, [], top=10)
+
+        self.assertEqual([risk.path for risk in result.churn_top], ["hot.py"])
+
+    def test_churn_top_empty_when_window_has_no_changes(self):
+        ranked = rank_files(
+            [FileHistory("cold.py", None, 0)],
+            todo_totals={},
+            todo_spicy={},
+            missing_test_paths=set(),
+        )
+
+        result = build_scan_result("repo", 90, ranked, [], top=10)
+
+        self.assertEqual(result.churn_top, [])
 
 
 if __name__ == "__main__":

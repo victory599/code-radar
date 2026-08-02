@@ -201,7 +201,12 @@ def build_scan_result(
         risks,
         key=lambda r: (-(r.stale_days or -1), r.path),
     )
-    churn_sorted = sorted(risks, key=lambda r: (-r.churn, r.path))
+    # “热改 Top”只展示窗口内真正发生过改动的文件；全为 0 时交给报告显示空状态，
+    # 避免把按路径排序的零值文件误解成热门文件。
+    churn_sorted = sorted(
+        (risk for risk in risks if risk.churn > 0),
+        key=lambda r: (-r.churn, r.path),
+    )
     missing_hot = [r for r in risks if r.missing_test]
     missing_hot.sort(key=lambda r: (-r.churn, -r.score, r.path))
 

@@ -39,19 +39,42 @@ SOURCE_EXTENSIONS: Set[str] = {
     ".svelte",
 }
 
-# 路径片段或后缀命中则忽略（依赖目录、锁文件、图片等噪音）。
+# 路径片段或后缀命中则忽略（依赖目录、第三方拷贝、构建/缓存、锁文件、图片等噪音）。
 IGNORE_DIR_PARTS: Set[str] = {
+    # —— 前端依赖 / 产物 ——
     "node_modules",
+    "bower_components",
+    "jspm_packages",
     "vendor",
+    "vendors",
+    "plugin",
+    "plugins",
     "dist",
     "build",
-    ".git",
-    "__pycache__",
     ".next",
-    "coverage",
+    # —— 多语言第三方拷贝 ——
+    "third_party",
+    "third-party",
+    "thirdparty",
+    "external",
+    "externals",
+    "libs",
+    # —— Java / 构建 ——
+    "target",
+    "generated-sources",
+    ".gradle",
+    # —— Python / 缓存 ——
+    "site-packages",
+    ".eggs",
+    "__pycache__",
     ".tox",
     ".venv",
     "venv",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    "coverage",
+    ".git",
 }
 
 IGNORE_SUFFIXES: Set[str] = {
@@ -68,7 +91,20 @@ IGNORE_SUFFIXES: Set[str] = {
     ".lock",
     ".min.js",
     ".min.css",
+    ".bundle.js",
+    ".bundle.css",
     ".map",
+    # Java 二进制 / 编译产物
+    ".jar",
+    ".war",
+    ".ear",
+    ".class",
+    # Python 分发与字节码
+    ".pyc",
+    ".pyo",
+    ".pyd",
+    ".egg",
+    ".whl",
 }
 
 IGNORE_BASENAMES: Set[str] = {
